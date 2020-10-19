@@ -3,13 +3,13 @@ from datetime import date
 from pycoingecko import CoinGeckoAPI  # https://github.com/man-c/pycoingecko
 from datetime import datetime
 import pandas as pd
-import numpy as np
 from dash import Dash
 import dash_core_components as dcc
 import dash_html_components as html
 from dash_table import DataTable
 from dash.dependencies import Input, Output, State
 
+# Python3 wrapper around the CoinGecko API
 cg = CoinGeckoAPI()
 
 
@@ -17,21 +17,25 @@ cg = CoinGeckoAPI()
 def get_names():
     coins = cg.get_coins_markets("usd")
 
-    symbols = {}
+    name = {}
     for coin in coins:
-        symbols[coin['symbol'].upper()] = coin['id']
+        name[coin['symbol'].upper()] = coin['id']
 
-    return symbols
+    return name
 
 
-def getIds():
-    coins = cg.get_coins_markets("usd")
-    ids = {}
+# gets price changes of cryptos
+def get_info():
+    coins = cg.get_coins_markets(vs_currency='usd', include_24hr_change='true')
+
+    info = {}
     for coin in coins:
-        ids[coin['id']] = coin['symbol'].upper()
-    return ids
+        info[coin['symbol'].upper()] = coin['price_change_percentage_24h']
+
+    return info
 
 
+# get account information
 def get_accounts():
     token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Ik0wTXhNVEEzTVVFeU5rRkZSREZGTnpSRE1VUXdPVVU0TXpBNFF6QkdRVVF6UkVSRE1VSTNSUSJ9.eyJpc3MiOiJodHRwczovL3N0YWNjeC5ldS5hdXRoMC5jb20vIiwic3ViIjoiejQ0RGdzWVFKREtyNTRCcmZvU0x3c2pLWWRtUDRLdWtAY2xpZW50cyIsImF1ZCI6Imh0dHBzOi8vc3RhY2MuZmludGVjaCIsImlhdCI6MTYwMTIwNTAwNywiZXhwIjoxNjAzNzk3MDA3LCJhenAiOiJ6NDREZ3NZUUpES3I1NEJyZm9TTHdzaktZZG1QNEt1ayIsImd0eSI6ImNsaWVudC1jcmVkZW50aWFscyJ9.fBvgUGcc1zS3eStbdGo19mLC6KqOdMeBdo_xuZEBz9jCzllRfrgqIhPbys5Se2XreGxu5_6oKWlXbqDOvnbuvjTJKnhoO9Aom1meUjqbQgaROeN0hbmPxVDKF-JDtOdZbAWtZv1ds9bWF0zqo9Z7ogicZ0eUi8FnEA2h2I6peVQPL9cJJwSfhjXPW73Ws4e6c0vynnhXLc5BcQgst0iaMZd4n3tdruzP_bgEY5GqbKvJxHjL2KNHh933VZSZdx_7mf4imsgsed2AL1QkIkqj5lvf_niyzrEmOLs_K_rSOZqRzO0c1u9wxrCK7qlryzpv8nz3C3zXfNdnMQHOejOFpQ"
     url = "https://fintech-webinar-2020-api.vercel.app/api/accounts"
@@ -39,43 +43,40 @@ def get_accounts():
     response = requests.get(url, headers=header)  # Get request
     df = pd.DataFrame(response.json())
 
-    df.insert(2, 'amount', [balance['amount'] for balance in df['balance']])
-    df.insert(3, 'currency', [balance['currency'] for balance in df['balance']])
+    # take data out of nested balance
+    df.insert(3, 'amount', [balance['amount'] for balance in df['balance']])
+    df.insert(4, 'currency', [balance['currency'] for balance in df['balance']])
+    # drop some columns
     df.drop(['balance', 'resource', 'resource_path'], axis=1, inplace=True)
     df.columns = df.columns.str.title()
 
     # use symbol to get name of coins and put data in df
-    namelist = get_names()
-    df['Coin'] = df['Currency'].map(namelist)
+    df['Coin'] = df['Currency'].map(get_names())
+    # endre på rekkefølgen på kolonnen lel
+    coin_name = df.pop('Coin')
+    df.insert(2, 'Coin', coin_name)
+    # use symbol to get price change for the last 24h and put data in df
+    df['price_change24h'] = df['Currency'].map(get_info())
+    # endre på rekkefølgen på kolonnen lel
+    coin_pc = df.pop('price_change24h')
+    df.insert(5, 'price_change24h', coin_pc)
 
-    coins = ",".join([get_names()[currency] for currency in df['Currency']])
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={coins}&vs_currencies=USD&include_market_cap=true"
-    response = requests.get(url)
+    # create list of the names of all the coinz
+    coinlist = df['Coin'].astype(str).values.flatten().tolist()
+    print(coinlist)
+    # get prices in usd
+    pricing = cg.get_price(coinlist, "usd", include_market_cap='true')
+    # putt økonomi ting inn i df - pris for 1 coin, sum for wallets og market_cap
+    df.insert(6, 'USD', [pricing[currency]['usd'] for currency in df['Coin']])
+    # regn ut totalverdi for wallets
+    wallet_value = [float(amount) * float(usd) for amount, usd in zip(df['Amount'], df['USD'])]
+    market_cap = [pricing[currency]['usd_market_cap'] for currency in df['Coin']]
+    df.insert(7, 'wallet_value', wallet_value)
+    df.insert(8, 'Market Cap', market_cap)
 
-    prices = {getIds()[key]: val for key, val in response.json().items()}
-    rates = [prices[currency]['usd'] for currency in df['Currency']]
-
-    # print(coinlist)
-    # pricing = cg.get_price(coinlist, "usd")
-    # print(pricing)
-    # rates = pricing['symbol']
-    # print(rates)
-    # df['Price'] = df['Coin'].map(pricing)
-
-    # prices = {df['Coin']: val for key, val in response.json().items()}
-    # print(prices)
-    # rates = [pricing['usd'] for currency in df['Currency']]
-    # print(rates)
-
-    df.insert(4, 'tot_value', np.round([float(amount) * float(rate) for amount, rate in zip(df['Amount'], rates)], 2))
-    df.insert(5, 'Market Cap', np.round([prices[currency]['usd_market_cap'] for currency in df['Currency']], 2))
     # legg in sortering på total verdi
-    df.sort_values(by=['tot_value'], ascending=False, inplace=True)
-    df.to_csv(r'acc.csv')
+    df.sort_values(by=['wallet_value'], ascending=False, inplace=True)
     return df
-
-
-print(get_accounts())
 
 
 # get data about a crypto currency for a specific date
@@ -91,17 +92,15 @@ def get_price_date(id, date):
 def get_price_history(coin, days):
     # get market_chart data from last x number of days
     price_history = cg.get_coin_market_chart_by_id(coin, "usd", days)
-
-    # convert time from UNIX
-    timestamps = [price[0] / 1000 for price in price_history['prices']]
-    dates = [datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') for timestamp in timestamps]
+    # legger til alle timestamps i liste
+    timestamps = [price[0] for price in price_history['prices']]
+    dates = [datetime.fromtimestamp(timestamp / 1000).strftime('%Y-%m-%d %H:%M:%S') for timestamp in timestamps]
     prices = [price[1] for price in price_history['prices']]
-
     # get lowest and highest price during the time interval
     historic_low = min([price[1] for price in price_history['prices']])
     historic_high = max([price[1] for price in price_history['prices']])
     # return coin, date-interval, prices, and historic low and high price
-    return coin, dates, prices, historic_low, historic_high
+    return dates, prices, historic_low, historic_high
 
 
 # Dash App med plotly
@@ -122,13 +121,29 @@ def generate_table():
         columns=[{"name": i, "id": i} for i in get_accounts().columns],
         data=account_data,
         sort_action="native",
+        style_data_conditional=[
+            {
+                'if': {
+                    'filter_query': '{price_change24h} < 0',
+                    'column_id': 'price_change24h',
+                },
+                'color': 'red'
+            },
+            {
+                'if': {
+                    'filter_query': '{price_change24h} > 0',
+                    'column_id': 'price_change24h',
+                },
+                'color': 'green'
+            }
+        ]
     )
 
 
 # create dropdownlist med alle coins i wallet
 def generate_ddl_coin():
     return dcc.Dropdown(
-        id='input-ddl',
+        id="input-ddl-coin",
         options=[{'label': i, 'value': i} for i in get_accounts()['Coin']],
         value='bitcoin',
         style=dict(
@@ -148,37 +163,56 @@ def generate_calendar():
     )
 
 
-app.layout = html.Div(children=[
+# generate slider where user can select input
+def generate_slider():
+    return html.Div(dcc.Slider(
+        id='slider',
+        min=1,
+        max=360,
+        value=30,
+        step=1,
+        marks={
+            7: '1 week',
+            30: '1 month',
+            90: 'Quarter',
+            180: '6 months',
+            360: '1 year'
+        }
+    ),
+        style={'width': '50%', 'padding': '20px 10px 10px 20px'},
+    )
 
-    html.H1("Stacc code challenge"),
+
+app.layout = html.Div(children=[
+    html.Br(),
+    html.H1("Stacc code challenge",
+            style={'text-align': 'center'}),
     html.H2("Table"),
     html.P("du kan sortere data i tabellen ved å klikke på pilene i headeren"),
     generate_table(),
     html.Br(),
-    html.Br(),
     html.H2("Graph"),
-    html.Label('Select a coin to display data about'),
+    html.Label('Select a coin to display data about, and use the slider to decide X numbers of past days you want to see'),
     generate_ddl_coin(),
-    html.Div(id='graph'),
-    html.Div(dcc.Slider(
-        id='slider',
-        min=1,
-        max=360,
-        value=30),
-        style={'width': '50%', 'padding': '20px 10px 10px 20px'}),
     html.Br(),
-    html.H2("See data from the past"),
-    html.P("select a date from the calender please, and it will show data about the cpin you selected"),
+    html.Div(id='graph'),
+    generate_slider(),
+    html.P(id='low_value'),
+    html.P(id='high_value'),
+    html.Br(),
+    html.H2("Historical price"),
+    html.P("select a date from the calender please, and it will show data about the coin you selected"),
     generate_calendar(),
-    html.Div(id='output-date-picker')
-
+    html.Div(id='output-date-picker'),
+    html.Br(),
+    html.Br()
 ])
 
 
 # find data for specific date
 @app.callback(
     Output('output-date-picker', 'children'),
-    [Input('input-ddl', 'value'),
+    [Input('input-ddl-coin', 'value'),
      Input('date-picker', 'date')])
 def update_calender_output(coin, date_value):
     string_prefix = 'You have selected the date '
@@ -186,22 +220,17 @@ def update_calender_output(coin, date_value):
         date_object = date.fromisoformat(date_value)
         date_string = date_object.strftime('%d-%m-%Y')
         price = get_price_date(coin, date_string)
-        return string_prefix + date_string + ", where the following was the price for " + coin + " was USD : " + str(price)
+        return string_prefix + date_string + ", where the following was the price for " + coin + ", USD : " + str(
+            price)
 
 
 # find data for graph
 @app.callback(
     Output('graph', 'children'),
-    # Output('low', 'string'),
-    # Output('high', 'string'),
-    [Input('input-ddl', 'value'),
+    [Input('input-ddl-coin', 'value'),
      Input('slider', 'value')])
 def update_graph(coin, days):
-    if not coin:
-        return None
-    else:
-        coin, dates, prices, historic_low, historic_high = get_price_history(coin, days)
-
+    dates, prices, historic_low, historic_high = get_price_history(coin, days)
     return html.Div(dcc.Graph(
         id='figure',
         figure={
@@ -227,10 +256,21 @@ def update_graph(coin, days):
         config={
             'displayModeBar': False
         }
-    ),
-        # html.P("Historic low in this period is USD : " + str(historic_low)),
-        # html.P("Historic high in this period is USD : " + str(historic_high))
     )
+    )
+
+
+# find historical high and lowest price for time period
+@app.callback(
+    [Output('low_value', 'children'),
+     Output('high_value', 'children')],
+    [Input('input-ddl-coin', 'value'),
+     Input('slider', 'value')])
+def update_graph(coin, days):
+    dates, prices, historic_low, historic_high = get_price_history(coin, days)
+    return "Historic low price in this " + str(days) + " day period for " + coin + " is USD " + str(
+        historic_low), "Historic high price in this " + str(days) + " day period for " + coin + " is USD " + str(
+        historic_high)
 
 
 if __name__ == '__main__':
