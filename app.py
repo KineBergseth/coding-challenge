@@ -63,7 +63,6 @@ def get_accounts():
 
     # create list of the names of all the coinz
     coinlist = df['Coin'].astype(str).values.flatten().tolist()
-    print(coinlist)
     # get prices in usd
     pricing = cg.get_price(coinlist, "usd", include_market_cap='true')
     # putt økonomi ting inn i df - pris for 1 coin, sum for wallets og market_cap
